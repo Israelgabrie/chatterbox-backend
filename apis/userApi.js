@@ -1,17 +1,33 @@
 const express = require("express")
 const userRouter = express.Router();
 const {connection,userSchema,userModel, otpSchema, otpModel} =  require("../database.js");
-const nodemailer = require('nodemailer');
 const {updateObject, setUserMailConfig, generateOtpCode,generateUserOtp} = require("../helperFunctions.js");
 const bcrypt = require("bcrypt");
 const { sendEmail } = require("../sendmails.js");
 const saltRounds = 13;
+const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
+require('dotenv').config();
+
+userRouter.use(cookieParser());
+
+
+// helper function to get user by id
+async function getUserById(userIdentity){
+  const appUser = await userModel.findOne({_id:userIdentity});
+  console.log("user found with token" + JSON.stringify(appUser));
+  if(appUser){
+    return appUser
+  }else{
+    return null
+  }
+}
 
 // helper function to save user otp data
 async function saveUserOtpCode(hashedOtp){
   try{
     const newUserOtp = new otpModel(hashedOtp);
-  newUserOtp.save()
+    newUserOtp.save()
   .then((otpObject)=>{
     console.log("user otp saved successfully")
   })
@@ -25,7 +41,7 @@ async function saveUserOtpCode(hashedOtp){
 
 
 
-userRouter.post("/checkName", async (req, res) => {
+userRouter.post("/checkName", async (req, res) =>{ 
     try {
       const user = await userModel.findOne({ name: req.body.name });
       res.send({
@@ -88,14 +104,96 @@ userRouter.post("/checkEmail", async (req, res) => {
     }
   });    
 
-  userRouter.post("/login",(req,res)=>{
-    try{
+  userRouter.post("/resendOtp", async (req, res) => {
+    try {
+        console.log("backend generating new otp code.....");
+        const { userId, email } = req.body;
 
-    }catch(error){
-      console.error(error);
-      res.send({ message: error.message,success:false });
+        // Generate a new OTP code
+        const newOtpCode = generateOtpCode();
+
+        // Hash the new OTP code
+        const newHashedOtp = await bcrypt.hash(newOtpCode, saltRounds);
+
+        // Update the existing OTP record in the database
+        const otpUpdate = await otpModel.updateOne(
+            { userId: userId },
+            {
+                otpCode: newHashedOtp,
+                createdAt: new Date(),
+                expiryDate: new Date(Date.now() + 3600000) // OTP valid for 1 hour
+            },
+            { upsert: true } // Create a new record if one does not exist
+        );
+
+        // Check if the OTP was updated successfully
+        if (otpUpdate.matchedCount === 0) {
+            // No existing OTP record, but check if the user exists
+            const user = await userModel.findOne({ _id: userId });
+            if (!user) {
+                return res.status(404).send({ success: false, message: "User not found." });
+            }
+
+            // Create a new OTP record since it didn't exist
+            await otpModel.create({
+                userId: userId,
+                otpCode: newHashedOtp,
+                createdAt: new Date(),
+                expiryDate: new Date(Date.now() + 3600000) // OTP valid for 1 hour
+            });
+        }
+
+        // Configure the email settings and send the new OTP
+        const mailConfig = await setUserMailConfig({ email }, newOtpCode);
+        await sendEmail(mailConfig); // Ensure we await the email sending
+
+        // Send API response if everything went successfully
+        res.send({ success: true, message: "New OTP sent successfully." });
+    } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: error.message, success: false });
     }
-  })
+});
+
+
+
+userRouter.get('/checkToken', async (req, res) => {
+  try {
+    console.log("cookies",JSON.stringify(req.cookies));
+    console.log("cookies",JSON.stringify(req.signedCookies));
+    if (req.cookies && req.cookies.token) {  // Ensure accessToken exists
+
+      console.log(req.cookies + "token gotten in the backend")
+      await jwt.verify(req.cookies.token, process.env.REFRESH_TOKEN, async (error, decode) => {
+        if (error) {
+          console.log("usertoekn not valid in the backend " + error); 
+          return res.status(401).send({ message: "Invalid token", success: false });
+        } else {
+          const user = await getUserById(decode.userId); // Await the getUserById result
+          if (!user) {
+            console.log("token verified but not user found " + JSON.stringify(decode)); 
+            return res.status(404).send({ message: "User not found", success: false });
+          }
+          console.log("user found and sent to the frontend " + user) 
+          res.send({
+            message: "User token validated successfully",
+            user: user, // Return the user object
+            success: true
+          });
+        }
+      });
+    } else {
+      return res.status(400).send({ success: false, message: "No cookies found in the request" });
+    }
+  } catch (error) {
+    console.log("Error checking token: " + error.message);
+    res.status(500).send({ success: false, message: error.message }); // Return error message in response
+  }
+});
+
+
+
+
 
 
 module.exports = {userRouter,saltRounds}

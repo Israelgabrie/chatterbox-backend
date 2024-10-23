@@ -1,60 +1,165 @@
 const express = require('express');
 const PORT = 3000;
 const app = express();
-const { connectDB, otpModel, userModel } = require('../database.js'); // Adjust the path as needed
-app.use(express.json());
+const cors = require('cors');
+const { connectDB, otpModel, userModel } = require('../database.js');
 const bcrypt = require("bcrypt");
+const jwt = require('jsonwebtoken');
+const cookieParser = require("cookie-parser");
+const socketIo = require('socket.io');
+require('dotenv').config();
+const { addNewDeviceDetails, removeDeviceDetails, returnChatsFound } = require('./socketFunctions.js');
 
-// importing use roruter and implementing it as middleware
-const {userRouter,saltRounds}  = require("./userApi.js");
-app.use("/user",userRouter);
+
+// Middleware to parse JSON request bodies
+app.use(express.json());
+
+// Use cookie-parser middleware
+app.use(cookieParser());
+
+// Allow requests from all origins with specific methods and headers
+app.use(cors({
+    origin: "*",
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+}));
+
+// Importing userRouter and implementing it as middleware
+const { userRouter, saltRounds } = require("./userApi.js");
+app.use("/user", userRouter);
 
 
+async function sendCookies(res,cookieName,cookieValue,options){
+    res.cookie(cookieName,cookieValue,options);
+}
 
-// check otp code for email confirmation
-app.post("/checkEmailCode", async (req, res) => {
-  try {
-    console.log("checking email code")
-    const { otpCode, userId } = req.body;
-    // check if otp exists
-    const unCheckedUser = await otpModel.findOne({ userId: userId });
-    if (unCheckedUser) {
-      // if the user exists
-      const validOtp = await bcrypt.compare(otpCode, unCheckedUser.otpCode); // await bcrypt.compare
-      if (validOtp) {
-        // if the otp code entered is valid
-        if (unCheckedUser.expiryDate > new Date()) { // compare expiry date
-          console.log("OTP validated successfully");
-          await userModel.updateOne(
-            { _id: unCheckedUser.userId },  // Query to match the document
-            { $set: { verified: true } }    // Update operation
-          )          
-          await otpModel.deleteOne({userId:unCheckedUser.userId})
-          res.send({ success: true, message: "OTP validated successfully" });
-        } else {
-          res.send({ success: false, message: "Verification code has expired" });
-        }
-      } else {
-        // if otp is invalid
-        res.send({ success: false, message: "Invalid code" });
+
+app.get("/checkTestRoute",async(req,res)=>{
+    sendCookies(res,"messi","football");
+   res.send({success:true,message:"test message",user:{verified:true}})
+})
+
+app.post("/testCookie",async(req,res)=>{
+    res.cookie("cookieName","cookieValue");
+    res.send("This is the cookie test response")
+})
+
+
+app.post("/login", async(req, res) => {
+    try {
+        console.log("logging user in from the backend")
+        const { email, password, rememberMe } = req.body;
+        console.log(JSON.stringify(req.cookies),"request cookies")
+  
+      // Check if email and password are provided
+      if (!email || !password) {
+        return res.status(400).send({ message: "Email and password are required", success: false });
       }
-    } else {
-      // if user doesn't exist
-      res.send({ success: false, message: "Invalid code" });
+  
+      // Find the user by email
+      const user = await userModel.findOne({ email });
+  
+      // Check if user exists
+      if (!user) {
+        return res.status(404).send({ message: "User doesn't exist", success: false });
+      }
+  
+      // Compare the password
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (isMatch) {
+        // If rememberMe is true, create a jwt token
+        if (rememberMe) {
+          const token = await jwt.sign({ userId: user._id , userEmail:user.email }, process.env.REFRESH_TOKEN, { expiresIn: '60d' }); // 60 days
+          console.log("user " + user.name + " logged in with jwt " + JSON.stringify({ userId: user._id }) + " and token is " + token);
+  
+          // Set cookie with proper settings for local development
+          console.log("token before res cookie "+token)
+          res.cookie('token', token, {
+            maxAge: 5184000, // 60 days
+            httpOnly: true,
+            secure: false, // Ensure you're using HTTPS
+            sameSite: 'None', // Allows cross-origin requests
+        });
+        }
+  
+        // Return success response with user data and token
+        return res.send({ success: true, message: "Login successful", user: { ...user.toObject() } });
+      } else {
+        return res.status(401).send({ success: false, message: "Invalid credentials" }); // Unauthorized status for invalid credentials
+      }
+    } catch (error) {
+      console.error(error);
+      res.status(500).send({ message: error.message, success: false });
     }
-  } catch (error) {
-    res.send({ success: false, message: error.message });
-  }
+  });
+
+
+// Check OTP code for email confirmation
+app.post("/checkEmailCode", async (req, res) => {
+    try {
+        console.log("Checking email code");
+        const { otpCode, userId } = req.body;
+        
+        // Check if OTP exists
+        const unCheckedUser = await otpModel.findOne({ userId: userId });
+        if (unCheckedUser) {
+            // If the user exists
+            const validOtp = await bcrypt.compare(otpCode, unCheckedUser.otpCode); // Compare OTP
+            if (validOtp) {
+                // If the OTP code entered is valid
+                if (unCheckedUser.expiryDate > new Date()) { // Compare expiry date
+                    await userModel.updateOne(
+                        { _id: unCheckedUser.userId },  // Query to match the document
+                        { $set: { verified: true } }    // Update operation
+                    );
+                    await otpModel.deleteOne({ userId: unCheckedUser.userId });
+                    res.send({ success: true, message: "OTP validated successfully" });
+                } else {
+                    res.send({ success: false, message: "Verification code has expired" });
+                }
+            } else {
+                // If OTP is invalid
+                res.send({ success: false, message: "Invalid code" });
+            }
+        } else {
+            // If user doesn't exist
+            res.send({ success: false, message: "Invalid code" });
+        }
+    } catch (error) {
+        res.send({ success: false, message: error.message });
+    }
 });
 
-
-
-
+// Start the server and socket.io
 async function startServer() {
-  const isConnected = await connectDB();
-  isConnected
-    ? app.listen(PORT, () => console.log(`App is running on port ${PORT}`))
-    : console.error('Failed to connect to MongoDB. Server not started.');
+    const isConnected = await connectDB();
+    if (isConnected) {
+        const server = app.listen(PORT, () => console.log(`App is running on port ${PORT}`));
+        const io = socketIo(server); // Initialize socket.io with the server
+
+        io.on('connection', (socket) => {
+            console.log('Socket connected:', socket.id);
+
+
+            // when user is searching for chats
+            socket.on("findChat",(chatName)=>{
+                returnChatsFound(chatName)
+            })
+
+            // add new device details when they logg in
+            socket.on("addDeviceDetails",(userId)=>{
+              addNewDeviceDetails(socket,userId);
+            })
+
+            // runs when a socket discontes from the server
+            socket.on('disconnect', () => {
+                removeDeviceDetails(socket);
+            });
+        });
+    } else {
+        console.error('Failed to connect to MongoDB. Server not started.');
+    }
 }
 
 // Start the server

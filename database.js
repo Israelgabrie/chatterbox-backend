@@ -25,51 +25,101 @@ async function connectDB() {
   }
 }
 
-// Define the user schema
 const userSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
-    unique:true
+    unique: true
   },
   email: {
     type: String,
     required: true,
-    unique:true
+    unique: true
   },
   password: {
     type: String,
-    required: true,
+    required: true
   },
   gender: {
-    type: String,
-    required: false,
+    type: String
   },
   dateOfBirth: {
-    type: Date,
-    required: false,
+    type: Date
   },
   active: {
     type: Boolean,
-    required: false,
+    default: true
   },
   image: {
-    type: String,
-    required: false,
+    type: String
   },
   chats: {
-    type: Array,
-    required: false,
+    type: [
+      {
+        isGroup: { type: Boolean, default: false },
+        groupAdminId: { type: String },
+        groupId: { type: String },
+        participants: [String],
+        senderId: { type: String, required: true },
+        receiverId: { type: String },
+        blocked: { type: Boolean, default: false },
+        messages: [
+          {
+            message: { type: String, required: true },
+            dateSent: { type: Date, default: Date.now },
+            seenBy: [String],
+            seen: { type: Boolean, default: false }
+          }
+        ]
+      }
+    ]
+  },
+  requestMade: {
+    type: [
+      {
+        receiverId: { type: String, required: true }, // ID of the user to whom the request was sent
+        timeOfRequest: { type: Date, default: Date.now },
+        accepted: { type: Boolean, default: false } // Whether the request has been accepted
+      }
+    ],
+    default: [] // Start with an empty array
+  },
+  requestReceived: {
+    type: [
+      {
+        senderId: { type: String, required: true }, // ID of the user who sent the request
+        timeOfRequest: { type: Date, default: Date.now },
+        accepted: { type: Boolean, default: false } // Whether the request has been accepted
+      }
+    ],
+    default: [] // Start with an empty array
   },
   createdAt: {
     type: Date,
-    default: Date.now,
+    default: Date.now
   },
-  verified:{
-    type:Boolean,
-    required:true
+  verified: {
+    type: Boolean,
+    required: true,
+    default: false
+  },
+  loginDetails: {
+    type: [
+      {
+        loginTime: { type: Date, default: Date.now },
+        socketId: { type: String }
+      }
+    ]
   }
 });
+
+const User = mongoose.model('User', userSchema);
+
+module.exports = User;
+
+
+
+
 
 const otpSchema = new mongoose.Schema({
   otpCode: {

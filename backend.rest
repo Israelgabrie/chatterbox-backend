@@ -1,0 +1,13 @@
+### Login User
+POST http://localhost:3000/user/login
+Content-Type: application/json
+
+{
+    "email": "isrealgab3@gmail.com",
+    "password": "isreal2005",
+    "rememberMe":false
+}
+
+###
+
+GET  http://localhost:3000/user/checkToken
