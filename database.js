@@ -56,19 +56,22 @@ const userSchema = new mongoose.Schema({
   chats: {
     type: [
       {
+        name: { type: String },
         isGroup: { type: Boolean, default: false },
-        groupAdminId: { type: String },
+        groupAdminId: { type: Boolean },
         groupId: { type: String },
         participants: [String],
-        senderId: { type: String, required: true },
-        receiverId: { type: String },
+        friendId: { type: String } ,
         blocked: { type: Boolean, default: false },
         messages: [
           {
             message: { type: String, required: true },
             dateSent: { type: Date, default: Date.now },
             seenBy: [String],
-            seen: { type: Boolean, default: false }
+            seen: { type: Boolean, default: false } ,
+            senderId: { type: String},
+            receiverId: { type: String },
+            type:{type :String , required: true}
           }
         ]
       }
@@ -77,22 +80,24 @@ const userSchema = new mongoose.Schema({
   requestMade: {
     type: [
       {
-        receiverId: { type: String, required: true }, // ID of the user to whom the request was sent
+        name: { type: String },
+        receiverId: { type: String, required: true }, // Removed unique: true
         timeOfRequest: { type: Date, default: Date.now },
-        accepted: { type: Boolean, default: false } // Whether the request has been accepted
+        accepted: { type: Boolean, default: false }
       }
     ],
-    default: [] // Start with an empty array
+    default: []
   },
   requestReceived: {
     type: [
       {
-        senderId: { type: String, required: true }, // ID of the user who sent the request
+        name: { type: String },
+        senderId: { type: String, required: true }, // Removed unique: true
         timeOfRequest: { type: Date, default: Date.now },
-        accepted: { type: Boolean, default: false } // Whether the request has been accepted
+        accepted: { type: Boolean, default: false }
       }
     ],
-    default: [] // Start with an empty array
+    default: []
   },
   createdAt: {
     type: Date,

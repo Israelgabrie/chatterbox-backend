@@ -8,7 +8,7 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require("cookie-parser");
 const socketIo = require('socket.io');
 require('dotenv').config();
-const { addNewDeviceDetails, removeDeviceDetails, returnChatsFound } = require('./socketFunctions.js');
+const { addNewDeviceDetails, removeDeviceDetails, returnChatsFound, addNewChat, cancelRequest } = require('./socketFunctions.js');
 
 
 // Middleware to parse JSON request bodies
@@ -70,17 +70,19 @@ app.post("/login", async(req, res) => {
       if (isMatch) {
         // If rememberMe is true, create a jwt token
         if (rememberMe) {
-          const token = await jwt.sign({ userId: user._id , userEmail:user.email }, process.env.REFRESH_TOKEN, { expiresIn: '60d' }); // 60 days
+          const token = await jwt.sign({ userId: user._id }, process.env.REFRESH_TOKEN, { expiresIn: '60d' }); // 60 days
           console.log("user " + user.name + " logged in with jwt " + JSON.stringify({ userId: user._id }) + " and token is " + token);
   
           // Set cookie with proper settings for local development
           console.log("token before res cookie "+token)
           res.cookie('token', token, {
-            maxAge: 5184000, // 60 days
-            httpOnly: true,
-            secure: false, // Ensure you're using HTTPS
-            sameSite: 'None', // Allows cross-origin requests
-        });
+            maxAge: 5184000, // 60 days in milliseconds
+            httpOnly: true,  // Prevents client-side access to the cookie
+            secure: false,   // Set to true in production (only over HTTPS)
+            sameSite: 'None', // Allows cross-origin requests (required for cross-site cookies)
+            domain: "localhost", // No protocol; or you can omit this line for localhost
+            path: "/checkToken"  // Path where the cookie is valid
+        });        
         }
   
         // Return success response with user data and token
@@ -141,11 +143,22 @@ async function startServer() {
         io.on('connection', (socket) => {
             console.log('Socket connected:', socket.id);
 
-
             // when user is searching for chats
-            socket.on("findChat",(chatName)=>{
-                returnChatsFound(chatName)
+            socket.on("findChat",(chatName,user)=>{
+                returnChatsFound(socket,chatName,user)
             })
+
+            socket.on("addNewChat",(user,newChat,callback)=>{
+                console.log("adding new chat")
+                addNewChat(io,socket,user,newChat,callback);
+            })  
+
+            // cancel sent friend request
+            socket.on("cancelRequest",(user,cancelRequestId,callback)=>{
+                console.log("canceling friend request made");
+                cancelRequest(io,socket,user,cancelRequestId,callback);
+               
+            }) 
 
             // add new device details when they logg in
             socket.on("addDeviceDetails",(userId)=>{
