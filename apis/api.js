@@ -8,22 +8,23 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require("cookie-parser");
 const socketIo = require('socket.io');
 require('dotenv').config();
-const { addNewDeviceDetails, removeDeviceDetails, returnChatsFound, addNewChat, cancelRequest } = require('./socketFunctions.js');
+const { addNewDeviceDetails, removeDeviceDetails, returnChatsFound, addNewChat, cancelRequest, acceptRequest, addChatMessage } = require('./socketFunctions.js');
 
+
+// Allow requests from all origins with specific methods and headers
+// CORS Middleware
+app.use(cors({
+    origin: ['http://localhost:8081', 'http://192.168.199.80:8081'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+}));
 
 // Middleware to parse JSON request bodies
 app.use(express.json());
 
 // Use cookie-parser middleware
 app.use(cookieParser());
-
-// Allow requests from all origins with specific methods and headers
-app.use(cors({
-    origin: "*",
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
-}));
 
 // Importing userRouter and implementing it as middleware
 const { userRouter, saltRounds } = require("./userApi.js");
@@ -76,13 +77,12 @@ app.post("/login", async(req, res) => {
           // Set cookie with proper settings for local development
           console.log("token before res cookie "+token)
           res.cookie('token', token, {
-            maxAge: 5184000, // 60 days in milliseconds
-            httpOnly: true,  // Prevents client-side access to the cookie
-            secure: false,   // Set to true in production (only over HTTPS)
-            sameSite: 'None', // Allows cross-origin requests (required for cross-site cookies)
-            domain: "localhost", // No protocol; or you can omit this line for localhost
-            path: "/checkToken"  // Path where the cookie is valid
-        });        
+            maxAge: 5184000,   // 60 days in milliseconds
+            httpOnly: true,    // Prevents client-side access to the cookie
+            secure: false,     // Set to true in production (only over HTTPS)
+            sameSite: 'Lax',   // Use 'Lax' for development with HTTP
+            path: '/'          // Ensure this covers the whole site
+          });     
         }
   
         // Return success response with user data and token
@@ -138,7 +138,15 @@ async function startServer() {
     const isConnected = await connectDB();
     if (isConnected) {
         const server = app.listen(PORT, () => console.log(`App is running on port ${PORT}`));
-        const io = socketIo(server); // Initialize socket.io with the server
+        // Initialize Socket.io with CORS settings
+        const io = socketIo(server, {
+        cors: {
+            origin: ['http://localhost:8081', 'http://192.168.199.80:8081'], // Same allowed origins
+            methods: ['GET', 'POST'],
+            allowedHeaders: ['Content-Type', 'Authorization'],
+            credentials: true,
+        },
+    });
 
         io.on('connection', (socket) => {
             console.log('Socket connected:', socket.id);
@@ -154,11 +162,20 @@ async function startServer() {
             })  
 
             // cancel sent friend request
-            socket.on("cancelRequest",(user,cancelRequestId,callback)=>{
-                console.log("canceling friend request made");
+            socket.on("cancelRequest",async(user,cancelRequestId,callback)=>{
                 cancelRequest(io,socket,user,cancelRequestId,callback);
-               
             }) 
+
+            // cancel sent friend request
+            socket.on("acceptRequest",async(user,idToBeAccepted,callback)=>{
+                acceptRequest(io,socket,user,idToBeAccepted,callback)               
+            }) 
+
+            // add new message
+            socket.on("addMessage",async(textMessage,user,idOfReceiver,callback)=>{
+                addChatMessage(io,socket,textMessage,user,idOfReceiver,callback)                              
+            }) 
+
 
             // add new device details when they logg in
             socket.on("addDeviceDetails",(userId)=>{

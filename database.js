@@ -48,7 +48,7 @@ const userSchema = new mongoose.Schema({
   },
   active: {
     type: Boolean,
-    default: true
+    default: false
   },
   image: {
     type: String
@@ -58,7 +58,7 @@ const userSchema = new mongoose.Schema({
       {
         name: { type: String },
         isGroup: { type: Boolean, default: false },
-        groupAdminId: { type: Boolean },
+        groupAdminId: { type: String },
         groupId: { type: String },
         participants: [String],
         friendId: { type: String } ,
@@ -67,8 +67,6 @@ const userSchema = new mongoose.Schema({
           {
             message: { type: String, required: true },
             dateSent: { type: Date, default: Date.now },
-            seenBy: [String],
-            seen: { type: Boolean, default: false } ,
             senderId: { type: String},
             receiverId: { type: String },
             type:{type :String , required: true}
