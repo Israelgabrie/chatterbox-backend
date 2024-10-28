@@ -145,7 +145,13 @@ userRouter.post("/checkEmail", async (req, res) => {
 
         // Configure the email settings and send the new OTP
         const mailConfig = await setUserMailConfig({ email }, newOtpCode);
-        await sendEmail(mailConfig); // Ensure we await the email sending
+        
+        try {
+           const sendEmailResponse =  await sendEmail(mailConfig); // Ensure we await the email sending
+        } catch (emailError) {
+            console.error("Error sending email:", emailError);
+            return res.status(500).send({ success: false, message: "Failed to send OTP. Please try again later." });
+        }
 
         // Send API response if everything went successfully
         res.send({ success: true, message: "New OTP sent successfully." });
@@ -154,6 +160,7 @@ userRouter.post("/checkEmail", async (req, res) => {
         res.status(500).send({ message: error.message, success: false });
     }
 });
+
 
 
 

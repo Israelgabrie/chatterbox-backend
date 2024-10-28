@@ -111,7 +111,7 @@ async function setUserMailConfig(requestBody,code) {
     `,
     attachments: [{
       filename: 'chatterbox logo.png',
-      path: '../frontend/assets/images/chatterbox logo.png',
+      path: './chatterbox logo.png',
       cid: 'logo' // same cid value as in the html img src
     }]
   };

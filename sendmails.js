@@ -9,6 +9,7 @@ async function sendEmail({ transporterObject, mailOptions }) {
 
     return { success: true, message: "Email sent successfully" };
   } catch (error) {
+    console.log("error sending user an email "+error.message)
     return { success: false, message: error.message };
   }
 }

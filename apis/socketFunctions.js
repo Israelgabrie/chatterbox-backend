@@ -14,6 +14,10 @@ const addNewDeviceDetails = async (socket, userId) => {
         } else {
             // If the user is found and updated successfully
             // console.log(`Device successfully registered for user ID: ${userId}`);
+            const updatedUserActiveStatus = await userModel.updateOne(
+                { _id: userId }, // Find the user by ID
+                {active:true } // set the user status of active to true
+            );
             socket.emit("serverSuccess", "Device Successfully Registered");
         }
     } catch (error) {
@@ -24,26 +28,49 @@ const addNewDeviceDetails = async (socket, userId) => {
 
 const removeDeviceDetails = async (socket) => {
     try {
-        console.log("removing old device from the backend "+socket.id);
+        // Find the current user based on the socket ID
+        const currentUserState = await userModel.findOne({ 'loginDetails.socketId': socket.id });
+
+        if (!currentUserState) {
+            console.log(`No user found with socket ID: ${socket.id}`);
+            socket.emit("serverError", "No user found with the provided socket ID");
+            return;
+        }
+
+        // Remove the device with the matching socket ID from loginDetails
         const updatedUserDetails = await userModel.updateOne(
-            { 'loginDetails.socketId': socket.id }, // Find the user with the matching socketId
-            { $pull: { loginDetails: { socketId: socket.id } } } // Remove the object from the loginDetails array
+            { 'loginDetails.socketId': socket.id },
+            { $pull: { loginDetails: { socketId: socket.id } } }
         );
 
         if (updatedUserDetails.matchedCount === 0) {
-            // If no user found with the given socketId
             console.log(`No user found with socket ID: ${socket.id}`);
             socket.emit("serverError", "No user found with the provided socket ID");
-        } else {
-            // If the login detail is removed successfully
-            console.log(`Device successfully removed for socket ID: ${socket.id}`);
-            socket.emit("serverSuccess", "Device Successfully Removed");
+            return;
         }
+
+        // Check if user has any other connected devices
+        const userAfterRemoval = await userModel.findOne({ _id: currentUserState._id });
+
+        if (!userAfterRemoval.loginDetails || userAfterRemoval.loginDetails.length === 0) {
+            // If no devices are connected, set active to false
+            await userModel.updateOne(
+                { _id: currentUserState._id },
+                { active: false }
+            );
+            console.log(`User ${currentUserState.name} has no devices connected`);
+        }
+
+        // Successfully removed the device
+        console.log(`Device successfully removed for socket ID: ${socket.id}`);
+        socket.emit("serverSuccess", "Device Successfully Removed");
+
     } catch (error) {
         console.error("An error occurred while removing the device:", error);
-        socket.emit("serverError", error.message); // Emit error message to the client
+        socket.emit("serverError", error.message);
     }
 };
+
 
 
 const returnChatsFound = async (socket, chatName, user) => {
@@ -106,6 +133,11 @@ const addNewChat = async (io, socket, user, newChat, callback) => {
             } else {
                 // Send a socket event that will update the user state on all devices
                 callback({ success: true, message: "Chat Request sent successfully" });
+
+                // update both their notifications 
+                const updateFriendNotifications = await userModel.updateOne({_id:newChat._id},
+                    {$push : {notifications : {title:"Friend Request",text:`${user.name} Sent You a friend Request`}}}
+                )
 
                 // Step 5: Fetch the full documents for both the sender and the recipient
                 const userDocument = await userModel.findOne({ _id: user._id });
@@ -239,6 +271,11 @@ async function cancelRequest(io, socket, user, chatToCancelId, callback) {
         } else {
             callback({ success: true, message: "Friend request accepted successfully" });
 
+             // update both their notifications 
+             const updatedReceiverNotification = await userModel.updateOne({_id:idToBeAccepted},
+                {$push : {notifications : {title:"Request Accepted",text:`${user.name} Accepted Your Freind Request`}}}
+            )
+
             const updatedFriend = await userModel.findById(idToBeAccepted);
             const updatedUser = await userModel.findById(user._id);
 
@@ -257,6 +294,64 @@ async function cancelRequest(io, socket, user, chatToCancelId, callback) {
         callback({ success: false, message: error.message });
     }
 }
+
+async function declineRequest(io, socket, user, idToBeRejected, callback) {
+    try {
+        console.log("decline user friend request")
+        // Remove idToBeRejected user from MY requestReceived list
+        const removeRequestReceivedUser = await userModel.updateOne(
+            { _id: user._id },
+            { $pull: { requestReceived: { senderId: idToBeRejected } } }
+        );
+
+        // Remove MY id from the other user's requestMade list
+        const removeReceiverSentRequest = await userModel.updateOne(
+            { _id: idToBeRejected },
+            { $pull: { requestMade: { receiverId: user._id } } }
+        );
+
+        // Check if both operations were successful
+        if (
+            removeRequestReceivedUser.matchedCount === 0 ||
+            removeReceiverSentRequest.matchedCount === 0
+        ) {
+            // If not, send a failure response
+            callback({ success: false, message: "Failed to decline friend request" });
+        } else {
+            // If successful, send a success response
+            callback({ success: true, message: "Friend request declined successfully" });
+
+            // Optionally, you can send a notification to the user whose request was declined
+            const updatedReceiverNotification = await userModel.updateOne(
+                { _id: idToBeRejected },
+                {
+                    $push: {
+                        notifications: {
+                            title: "Request Declined",
+                            text: `${user.name} declined your friend request`
+                        }
+                    }
+                }
+            );
+
+            // Fetch updated user details for the one who sent the request
+            const updatedFriend = await userModel.findById(idToBeRejected);
+
+            // Emit updates to the user who sent the friend request
+            if (updatedFriend) {
+                updatedFriend.loginDetails.forEach((loginData) => {
+                    io.to(loginData.socketId).emit("updateUser", updatedFriend);
+                    io.to(loginData.socketId).emit("newNotification", `${user.name} declined your friend request`);
+                });
+            }
+        }
+    } catch (error) {
+        // Log any errors and send an error response
+        console.log("Error while declining friend request:", error);
+        callback({ success: false, message: error.message });
+    }
+}
+
 
 
 
@@ -322,13 +417,38 @@ async function addChatMessage(io, socket, textMessage, user, idOfReceiver, callb
 }
   
 
+async function addDisplayImage(io,socket,userId,fileBuffer,fileType,callback){
+    try{
+        console.log(userId,"id of user")
+        const updateUserImage = await userModel.updateOne({_id:userId},
+            {image : {buffer : fileBuffer , contentType : fileType}}
+        );
+        if(updateUserImage.matchedCount == 0){
+            callback({success:false,message:"unable to update user display image"})
+        }else{
+            callback({success:true,message:"display image updated successfully"})
+            const updatedUser = await userModel.findOne({_id:userId});
+            console.log(updatedUser.image.buffer)
+            updatedUser.loginDetails.forEach((loginData)=>{
+                io.to(loginData.socketId).emit("updateUser",updatedUser)
+            })
+        }
+    }catch(error){
+        console.log(`error updating user display image ${error.message}`)
+        callback({success:false,message:error.message})
+    }
+}
+
+
 
 module.exports = {
+    addDisplayImage,
     addNewDeviceDetails,
     removeDeviceDetails,
     returnChatsFound,
     addNewChat,
     cancelRequest,
     acceptRequest,
-    addChatMessage
+    addChatMessage,
+    declineRequest,
 };

@@ -51,7 +51,10 @@ const userSchema = new mongoose.Schema({
     default: false
   },
   image: {
-    type: String
+    type:{
+      buffer:Buffer,
+      contentType:String
+    }
   },
   chats: {
     type: [
@@ -111,6 +114,14 @@ const userSchema = new mongoose.Schema({
       {
         loginTime: { type: Date, default: Date.now },
         socketId: { type: String }
+      }
+    ]
+  },
+  notifications:{
+    type:[
+      {
+        title:{type: String},
+        text:{type:String}
       }
     ]
   }

@@ -8,13 +8,14 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require("cookie-parser");
 const socketIo = require('socket.io');
 require('dotenv').config();
-const { addNewDeviceDetails, removeDeviceDetails, returnChatsFound, addNewChat, cancelRequest, acceptRequest, addChatMessage } = require('./socketFunctions.js');
+const { addNewDeviceDetails, removeDeviceDetails, returnChatsFound, addNewChat, cancelRequest, acceptRequest, addChatMessage, addDisplayImage } = require('./socketFunctions.js');
+const declineRequest = require('./socketFunctions.js').declineRequest;
 
 
 // Allow requests from all origins with specific methods and headers
 // CORS Middleware
 app.use(cors({
-    origin: ['http://localhost:8081', 'http://192.168.199.80:8081'],
+    origin: ['http://localhost:8081', 'http://192.168.137.1:8081'],
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
@@ -28,7 +29,9 @@ app.use(cookieParser());
 
 // Importing userRouter and implementing it as middleware
 const { userRouter, saltRounds } = require("./userApi.js");
+const updateRouter = require('./updateRouter.js');
 app.use("/user", userRouter);
+app.use("/updateUser", updateRouter);
 
 
 async function sendCookies(res,cookieName,cookieValue,options){
@@ -141,7 +144,7 @@ async function startServer() {
         // Initialize Socket.io with CORS settings
         const io = socketIo(server, {
         cors: {
-            origin: ['http://localhost:8081', 'http://192.168.199.80:8081'], // Same allowed origins
+            origin: ['http://localhost:8081', 'http://192.168.137.1:8081'], // Same allowed origins
             methods: ['GET', 'POST'],
             allowedHeaders: ['Content-Type', 'Authorization'],
             credentials: true,
@@ -157,7 +160,6 @@ async function startServer() {
             })
 
             socket.on("addNewChat",(user,newChat,callback)=>{
-                console.log("adding new chat")
                 addNewChat(io,socket,user,newChat,callback);
             })  
 
@@ -174,8 +176,18 @@ async function startServer() {
             // add new message
             socket.on("addMessage",async(textMessage,user,idOfReceiver,callback)=>{
                 addChatMessage(io,socket,textMessage,user,idOfReceiver,callback)                              
-            }) 
+            })
+            
+            // add new message
+            socket.on("addDisplayImage",async({userId,fileBuffer,fileType},callback)=>{
+                addDisplayImage(io,socket,userId,fileBuffer,fileType,callback)                          
+            })
 
+            // cancel sent friend request
+            socket.on("declineRequest",async(user,idToBeRejected,callback)=>{
+                console.log("backend received decline request")
+                declineRequest(io,socket,user,idToBeRejected,callback)               
+            }) 
 
             // add new device details when they logg in
             socket.on("addDeviceDetails",(userId)=>{
@@ -194,3 +206,4 @@ async function startServer() {
 
 // Start the server
 startServer();
+
